@@ -1,25 +1,30 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-AutoCaption Pro v1.0 (Minimal)
-==============================
-자막 트랙 -> Text+ 템플릿 자동 변환
-무료 버전 완벽 지원!
+AutoCaption Pro v1.0
+====================
+DaVinci Resolve 자막 → Text+ 템플릿 자동 변환
 
-실행: Workspace > Scripts > Utility > autocaption_pro
+[사용 방법]
+1. Power Bins > Master > AutoCaption Pro 폴더 클릭 (또는 Media Pool에 복사)
+2. Workspace > Scripts > Utility > autocaption_pro 실행
+3. 완료!
+
+[요구사항]
+- DaVinci Resolve 20.2+ (무료 버전 지원)
+- AutoCaption Pro 폴더에 Text+ 템플릿 준비
+- 타임라인에 자막 트랙(ST1) 준비
 """
 
 # ============================================================================
 # 설정
 # ============================================================================
-TEMPLATE_FOLDER = "AutoCaption Pro"   # Power Bin 내 폴더명
-SUBTITLE_TRACK = 1                     # ST1 = 1
+SUBTITLE_TRACK = 1  # ST1 = 1
 
 
 def get_resolve():
-    """Resolve 연결 (Fusion Scripts 메뉴에서 실행 시)"""
+    """Resolve 연결"""
     try:
-        # Fusion Scripts에서 실행 시 전역 변수 사용
         resolve = fusion.GetResolve()
         if resolve:
             return resolve
@@ -27,7 +32,6 @@ def get_resolve():
         pass
 
     try:
-        # 외부 실행 시 (Studio 버전만 지원)
         import DaVinciResolveScript as dvr
         resolve = dvr.scriptapp("Resolve")
         if resolve:
@@ -70,58 +74,32 @@ def get_subtitles(timeline):
             "duration": item.GetDuration()
         })
 
-    print(f"Found {len(subtitles)} subtitles")
+    print(f"Subtitles: {len(subtitles)}개 발견")
     return subtitles
 
 
 def find_template_folder(project):
-    """Media Pool 또는 현재 폴더에서 템플릿 폴더 찾기"""
+    """현재 선택된 폴더를 템플릿 폴더로 사용"""
     media_pool = project.GetMediaPool()
+    current = media_pool.GetCurrentFolder()
 
-    # 재귀 탐색 함수
-    def search(folder, depth=0):
-        if depth > 10:
-            return None
-        name = folder.GetName()
-        print(f"{'  '*depth}[Folder] {name}")
-
-        # AutoCaption 포함하면 찾음
-        if "AutoCaption" in name:
-            return folder
-
-        for sub in folder.GetSubFolderList():
-            result = search(sub, depth + 1)
-            if result:
-                return result
+    if not current:
+        print("ERROR: 폴더를 선택해주세요")
         return None
 
-    # 1. 현재 폴더에서 먼저 검색
-    print("=== 현재 폴더 검색 ===")
-    current = media_pool.GetCurrentFolder()
-    if current:
-        print(f"Current folder: {current.GetName()}")
-        if "AutoCaption" in current.GetName():
-            print(f"Found folder: {current.GetName()}")
-            return current
+    folder_name = current.GetName()
 
-    # 2. Root 폴더에서 검색
-    print("=== Root 폴더 검색 ===")
-    root = media_pool.GetRootFolder()
-    folder = search(root)
+    # "AutoCaption" 포함 여부 체크 (대소문자 무시)
+    if "autocaption" not in folder_name.lower():
+        print(f"\n⚠️  잘못된 폴더가 선택되었습니다")
+        print(f"현재 선택: {folder_name}")
+        print(f"\n다음 중 하나를 선택하고 다시 실행하세요:")
+        print(f"  1) Power Bins > Master > AutoCaption Pro 폴더 선택")
+        print(f"  2) Media Pool에 AutoCaption Pro 폴더 복사 후 선택\n")
+        return None
 
-    if folder:
-        print(f"Found folder: {folder.GetName()}")
-        return folder
-
-    # 3. 못 찾으면 현재 폴더의 클립이라도 확인
-    print("=== 폴더 못 찾음 - 현재 폴더 사용 ===")
-    if current and current.GetClipList():
-        print(f"Using current folder: {current.GetName()}")
-        return current
-
-    print(f"ERROR: '{TEMPLATE_FOLDER}' 폴더를 찾을 수 없습니다")
-    print("해결방법: Media Pool에서 템플릿이 있는 폴더를 선택한 후 다시 실행하세요")
-    return None
+    print(f"Template folder: {folder_name}")
+    return current
 
 
 def get_template(folder):
@@ -145,8 +123,6 @@ def process_subtitles(project, timeline, subtitles, template):
 
     success = 0
     for i, sub in enumerate(subtitles):
-        # 1. 타임라인에 템플릿 추가 (Snap Captions 방식)
-        # endFrame = duration (0-indexed가 아님, duration 그대로 사용)
         clip_info = {
             "mediaPoolItem": template,
             "startFrame": 0,
@@ -162,20 +138,17 @@ def process_subtitles(project, timeline, subtitles, template):
 
         clip = items[0]
 
-        # 2. Fusion Comp 가져오기
         comp = clip.GetFusionCompByIndex(1)
         if not comp:
             print(f"  [{i+1}] FAIL: Fusion Comp 없음")
             continue
 
-        # 3. Text+ 노드 찾기 (Snap Captions 방식: GetToolList)
         tools = comp.GetToolList(False, "TextPlus")
         if not tools:
             print(f"  [{i+1}] FAIL: TextPlus 노드 없음")
             continue
 
-        # 4. 텍스트 변경
-        text_node = tools[1]  # Lua는 1-indexed, Python에서도 dict key가 1
+        text_node = tools[1]
         text_node.SetInput("StyledText", sub["text"])
 
         print(f"  [{i+1}] OK: {sub['text'][:20]}...")
@@ -186,8 +159,12 @@ def process_subtitles(project, timeline, subtitles, template):
 
 def main():
     print("=" * 50)
-    print("AutoCaption Pro")
+    print("AutoCaption Pro v1.0")
     print("=" * 50)
+    print("\n[사용 방법]")
+    print("  1) Power Bins > AutoCaption Pro 폴더 선택")
+    print("  2) 또는 Media Pool에 템플릿 복사 후 선택")
+    print("  3) 이 스크립트 실행\n")
 
     # 1. Resolve 연결
     resolve = get_resolve()
@@ -217,8 +194,11 @@ def main():
     success = process_subtitles(project, timeline, subtitles, template)
 
     # 6. 결과
-    print("=" * 50)
-    print(f"Done! {success}/{len(subtitles)} converted")
+    print("\n" + "=" * 50)
+    if success == len(subtitles):
+        print(f"완료! {success}/{len(subtitles)}개 변환 성공")
+    else:
+        print(f"부분 완료: {success}/{len(subtitles)}개 변환 성공")
     print("=" * 50)
 
 
